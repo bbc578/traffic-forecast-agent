@@ -1,0 +1,32 @@
+seed: 42
+data:
+  path: data/sample/synthetic_traffic.npz
+  input_steps: 12
+  horizon: 3
+  train_ratio: 0.7
+  val_ratio: 0.1
+  target_feature: speed
+training:
+  batch_size: 32
+  epochs: 5
+  learning_rate: 0.001
+  weight_decay: 0.0001
+model:
+  hidden_size: 64
+  num_layers: 1
+  dropout: 0.1
+analysis:
+  congestion_speed_threshold: 35.0
+  top_k: 5
+outputs:
+  dir: outputs
+  run_name: ablation
+  allow_overwrite: false
+ablation:
+  variants:
+    - no_graph
+    - physical_graph
+    - correlation_graph
+    - adaptive_graph
+    - temporal_only
+    - spatial_temporal

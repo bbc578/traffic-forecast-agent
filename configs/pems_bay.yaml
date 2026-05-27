@@ -1,0 +1,30 @@
+# Real PEMS-BAY experiment config.
+# Prepare the data first:
+# python -m traffic_agent.data.prepare_real_dataset --dataset pems-bay \
+#   --traffic-file data/raw/PEMS-BAY/pems-bay.h5 \
+#   --adj-file data/raw/PEMS-BAY/adj_mx.pkl \
+#   --output data/processed/pems_bay.npz
+seed: 42
+data:
+  path: data/processed/pems_bay.npz
+  input_steps: 12
+  horizon: 3
+  train_ratio: 0.7
+  val_ratio: 0.1
+  target_feature: speed
+training:
+  batch_size: 64
+  epochs: 20
+  learning_rate: 0.001
+  weight_decay: 0.0001
+model:
+  hidden_size: 64
+  num_layers: 1
+  dropout: 0.1
+analysis:
+  congestion_speed_threshold: 35.0
+  top_k: 10
+outputs:
+  dir: outputs
+  run_name: pems_bay
+  allow_overwrite: false

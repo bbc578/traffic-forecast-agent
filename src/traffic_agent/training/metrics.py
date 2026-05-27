@@ -31,3 +31,44 @@ def mape(y_true: Any, y_pred: Any, epsilon: float = 1e-5) -> float:
     pred = _to_numpy(y_pred)
     denominator = np.maximum(np.abs(true), epsilon)
     return float(np.mean(np.abs((true - pred) / denominator)) * 100.0)
+
+
+def _masked_arrays(
+    y_true: Any,
+    y_pred: Any,
+    mask_value: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    true = _to_numpy(y_true)
+    pred = _to_numpy(y_pred)
+    mask = np.isfinite(true) & np.isfinite(pred)
+    if mask_value is not None:
+        mask &= true != mask_value
+    if not np.any(mask):
+        return np.array([0.0], dtype=np.float64), np.array([0.0], dtype=np.float64)
+    return true[mask], pred[mask]
+
+
+def masked_mae(y_true: Any, y_pred: Any, mask_value: float | None = None) -> float:
+    """MAE ignoring NaN/Inf and optional sentinel values."""
+    true, pred = _masked_arrays(y_true, y_pred, mask_value)
+    return mae(true, pred)
+
+
+def masked_rmse(y_true: Any, y_pred: Any, mask_value: float | None = None) -> float:
+    """RMSE ignoring NaN/Inf and optional sentinel values."""
+    true, pred = _masked_arrays(y_true, y_pred, mask_value)
+    return rmse(true, pred)
+
+
+def masked_mape(
+    y_true: Any,
+    y_pred: Any,
+    mask_value: float | None = None,
+    epsilon: float = 1e-5,
+) -> float:
+    """MAPE ignoring NaN/Inf, optional sentinel values, and near-zero denominators."""
+    true, pred = _masked_arrays(y_true, y_pred, mask_value)
+    keep = np.abs(true) > epsilon
+    if not np.any(keep):
+        return 0.0
+    return mape(true[keep], pred[keep], epsilon=epsilon)

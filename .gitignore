@@ -11,4 +11,15 @@ outputs/*
 !outputs/.gitkeep
 data/sample/*.npz
 !data/sample/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+!data/raw/README.md
+data/processed/*
+!data/processed/.gitkeep
+experiments/results/*
+!experiments/results/.gitkeep
+experiments/figures/*
+!experiments/figures/.gitkeep
+experiments/reports/*
+!experiments/reports/.gitkeep
 .DS_Store

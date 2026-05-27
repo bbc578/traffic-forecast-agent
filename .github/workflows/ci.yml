@@ -18,6 +18,8 @@ jobs:
           pip install -r requirements.txt
       - name: Generate synthetic demo data
         run: python -m traffic_agent.data.generate_synthetic --output data/sample/synthetic_traffic.npz
+      - name: Smoke train LastValue
+        run: python -m traffic_agent.training.train --config configs/demo.yaml --model last_value
       - name: Ruff
         run: ruff check .
       - name: Pytest

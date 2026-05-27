@@ -17,6 +17,7 @@ class PreprocessingResult:
     scaler: StandardScaler
     train_mean: np.ndarray
     split_indices: tuple[int, int]
+    raw_split_indices: tuple[int, int] | None = None
 
 
 def split_time_ordered(

@@ -30,6 +30,9 @@ def load_traffic_npz(path: str | Path) -> tuple[np.ndarray, np.ndarray, dict[str
         feature_names = _decode_array(loaded["feature_names"])
         node_ids = _decode_array(loaded["node_ids"])
         is_synthetic = bool(loaded["is_synthetic_data"]) if "is_synthetic_data" in loaded else False
+        timestamps = _decode_array(loaded["timestamps"]) if "timestamps" in loaded else []
+        dataset_name = str(loaded["dataset_name"]) if "dataset_name" in loaded else data_path.stem
+        adjacency_type = str(loaded["adjacency_type"]) if "adjacency_type" in loaded else "physical"
 
     if data.ndim != 3:
         raise ValueError(f"`data` must be 3-dimensional [T, N, F], got shape {data.shape}.")
@@ -57,6 +60,9 @@ def load_traffic_npz(path: str | Path) -> tuple[np.ndarray, np.ndarray, dict[str
         "feature_names": feature_names,
         "node_ids": node_ids,
         "is_synthetic_data": is_synthetic,
+        "timestamps": timestamps,
+        "dataset_name": dataset_name,
+        "adjacency_type": adjacency_type,
         "path": str(data_path),
     }
     return data, adjacency, metadata

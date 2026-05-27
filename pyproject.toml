@@ -9,12 +9,16 @@ description = "Urban traffic forecasting, congestion analysis, dashboard, and ru
 requires-python = ">=3.11"
 readme = "README.md"
 
+[project.scripts]
+traffic-agent = "traffic_agent.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+exclude = ["outputs", "data/raw", "data/processed"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

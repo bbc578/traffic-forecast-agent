@@ -82,6 +82,9 @@ def save_synthetic_dataset(output: str | Path, seed: int = 42) -> None:
         adjacency=adjacency,
         feature_names=np.array(feature_names),
         node_ids=np.array(node_ids),
+        timestamps=np.array([f"synthetic_t_{i}" for i in range(data.shape[0])]),
+        dataset_name=np.array("synthetic_demo"),
+        adjacency_type=np.array("physical"),
         is_synthetic_data=np.array(True),
     )
 

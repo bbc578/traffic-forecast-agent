@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from traffic_agent.agent.schemas import AgentResponse
+from traffic_agent.agent.executor import AgentExecutor
 from traffic_agent.agent.tools import (
     compare_runs,
     generate_daily_report,
@@ -31,6 +32,13 @@ class RuleBasedTrafficAgent:
 
     def query(self, query: str, run_name: str | None = None) -> AgentResponse:
         """Route a natural-language query to local analysis tools."""
+        if any(word in query for word in ["哪个模型", "时间段", "图结构", "失败案例", "真实交通信号控制"]):
+            structured = AgentExecutor(outputs_dir=str(self.outputs_dir)).run(query, run_name=run_name)
+            return AgentResponse(
+                answer=structured.answer,
+                tool_used=",".join(structured.tools_used) if structured.tools_used else structured.intent,
+                data=structured.data,
+            )
         normalized = query.strip().lower()
         try:
             if any(word in normalized for word in ["哪里最堵", "拥堵", "最堵", "风险"]):

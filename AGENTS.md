@@ -1,27 +1,43 @@
 # AGENTS.md
 
-## 项目开发约定
+## Core Rules
 
-- 使用 Python 3.11+，代码位于 `src/traffic_agent/`。
-- 保持模块清晰，避免把训练、分析、API、Dashboard 混在一个文件中。
-- 使用类型注解和关键函数 docstring。
-- 不要虚构实验指标；所有指标必须由训练或评估代码实际计算生成。
-- synthetic demo data 必须明确标注为流程演示数据，不代表真实交通预测效果。
-- Agent 只能读取和总结本地输出，不可描述为真实交通控制系统。
+- Do not invent experiment results.
+- Do not present synthetic results as real traffic results.
+- Do not write SOTA, industrial-grade, or real-traffic-control claims.
+- Agent features must not claim they can control signals or replace traffic authorities.
+- Real data configs must fail clearly if prepared real `.npz` files are missing.
 
-## 常用命令
+## Development Rules
+
+- New models require tests, docs, and README updates.
+- Training logic changes must check for time-series leakage.
+- Scalers must fit on train data only.
+- Correlation adjacency must be built from train time only and labeled as correlation.
+- Dashboard charts need interpretation text.
+- Large raw datasets, model weights, and predictions should not be committed.
+
+## Commands to Run After Changes
 
 ```bash
-pytest
 ruff check .
+pytest
 python -m traffic_agent.data.generate_synthetic --output data/sample/synthetic_traffic.npz
-python -m traffic_agent.training.train --config configs/demo.yaml --model historical_average
-python -m traffic_agent.training.train --config configs/demo.yaml --model lstm
-python -m traffic_agent.training.train --config configs/demo.yaml --model stgcn_lite
+python -m traffic_agent.training.train --config configs/demo.yaml --model last_value
 ```
 
-## 修改要求
+If a command fails or cannot be run because of environment limits, state that in the final summary.
 
-- 修改代码后必须尽量运行相关测试。
-- 新增功能必须更新 README。
-- 如果某功能因环境限制无法完成，最终总结中必须明确说明，不要假装完成。
+## Useful Training Commands
+
+```bash
+python -m traffic_agent.training.train --config configs/demo.yaml --model last_value
+python -m traffic_agent.training.train --config configs/demo.yaml --model gru
+python -m traffic_agent.training.train --config configs/demo.yaml --model stgcn_improved
+python -m traffic_agent.training.run_experiments \
+  --config configs/demo.yaml \
+  --models last_value historical_average lstm gru stgcn_improved graph_wavenet_lite \
+  --horizons 3 6 12 \
+  --seeds 42 \
+  --output experiments/results/demo_experiment_summary.csv
+```

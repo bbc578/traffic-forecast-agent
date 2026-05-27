@@ -2,92 +2,239 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from traffic_agent.agent.rule_based_agent import RuleBasedTrafficAgent
+from traffic_agent.agent.executor import AgentExecutor
 from traffic_agent.agent.tools import generate_daily_report, get_top_congestion_nodes
+from traffic_agent.analysis.error_analysis import (
+    error_by_horizon,
+    error_by_node,
+    error_by_time_of_day,
+    residual_distribution,
+    worst_case_segments,
+)
+from traffic_agent.analysis.graph_analysis import adjacency_stats, top_connected_nodes
+from traffic_agent.data.loader import load_traffic_npz
 
 OUTPUTS_DIR = Path("outputs")
 
 
 def list_runs() -> list[str]:
-    if not OUTPUTS_DIR.exists():
-        return []
-    return sorted(path.name for path in OUTPUTS_DIR.iterdir() if (path / "metrics.json").exists())
+    return sorted(path.name for path in OUTPUTS_DIR.glob("*/metrics.json")) if OUTPUTS_DIR.exists() else []
 
 
-def load_metrics(run_name: str) -> dict[str, object]:
-    with (OUTPUTS_DIR / run_name / "metrics.json").open("r", encoding="utf-8") as f:
-        return json.load(f)
+def load_metrics(run_name: str) -> dict[str, Any]:
+    return json.loads((OUTPUTS_DIR / run_name / "metrics.json").read_text(encoding="utf-8"))
 
 
-def load_predictions(run_name: str) -> dict[str, object]:
+def load_predictions(run_name: str) -> dict[str, Any]:
     with np.load(OUTPUTS_DIR / run_name / "predictions.npz", allow_pickle=False) as loaded:
-        return {
-            "y_true": loaded["y_true"],
-            "y_pred": loaded["y_pred"],
-            "node_ids": [str(item) for item in loaded["node_ids"].tolist()],
-        }
+        return {key: loaded[key] for key in loaded.files}
 
 
-def main() -> None:
-    st.set_page_config(page_title="Traffic Forecast Agent", layout="wide")
-    st.title("城市路网交通态势预测与拥堵分析智能体系统")
-    st.warning(
-        "当前项目为学习/实习作品 Demo。若使用 synthetic 数据，结果仅代表流程演示，"
-        "不代表真实城市交通状况。"
+def metric_card(label: str, value: Any) -> None:
+    st.metric(label, f"{float(value):.4f}" if isinstance(value, int | float) else value)
+
+
+def show_empty_state() -> None:
+    st.info("尚未发现 run。先运行 synthetic smoke train，或准备真实数据后训练。")
+    st.code(
+        "python -m traffic_agent.data.generate_synthetic --output data/sample/synthetic_traffic.npz\n"
+        "python -m traffic_agent.training.train --config configs/demo.yaml --model last_value"
     )
 
-    runs = list_runs()
-    if not runs:
-        st.info("尚未发现 run。请先运行训练命令生成 outputs/<run_name>/。")
-        st.code("python -m traffic_agent.training.train --config configs/demo.yaml --model historical_average")
-        return
 
-    run_name = st.sidebar.selectbox("选择 run", runs)
-    metrics = load_metrics(run_name)
-    predictions = load_predictions(run_name)
-
-    st.subheader("模型指标")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("MAE", f"{float(metrics['mae']):.4f}")
-    col2.metric("RMSE", f"{float(metrics['rmse']):.4f}")
-    col3.metric("MAPE", f"{float(metrics['mape']):.4f}%")
-
-    st.subheader("预测 vs 真实曲线")
-    node_ids = predictions["node_ids"]
-    selected_node = st.selectbox("选择传感器节点", node_ids)
-    node_index = node_ids.index(selected_node)
-    y_true = predictions["y_true"][:, :, node_index].reshape(-1)
-    y_pred = predictions["y_pred"][:, :, node_index].reshape(-1)
+def prediction_figure(y_true: np.ndarray, y_pred: np.ndarray, title: str) -> go.Figure:
     max_points = min(240, len(y_true))
     fig = go.Figure()
     fig.add_trace(go.Scatter(y=y_true[:max_points], mode="lines", name="True speed"))
     fig.add_trace(go.Scatter(y=y_pred[:max_points], mode="lines", name="Predicted speed"))
-    fig.update_layout(xaxis_title="Test horizon samples", yaxis_title="Speed")
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(title=title, xaxis_title="Test horizon samples", yaxis_title="Speed")
+    return fig
 
-    st.subheader("Top-K 拥堵风险节点")
-    top_k = st.slider("Top-K", min_value=1, max_value=20, value=5)
-    congestion = get_top_congestion_nodes(str(OUTPUTS_DIR / run_name), k=top_k)
-    st.dataframe(pd.DataFrame(congestion), use_container_width=True)
 
-    st.subheader("Agent 问答")
-    query = st.text_input("输入中文问题", value="未来哪里最堵？")
-    if st.button("提交问题"):
-        agent = RuleBasedTrafficAgent(outputs_dir=str(OUTPUTS_DIR))
-        response = agent.query(query, run_name=run_name)
-        st.write(response.answer)
-        if response.data is not None:
+def main() -> None:
+    st.set_page_config(page_title="Traffic Forecast Agent", layout="wide")
+    st.title("Urban Traffic Forecasting & Congestion Analysis Agent")
+    st.caption("Algorithm + diagnostics + agent trace + visualization. Offline portfolio system, not traffic control.")
+
+    runs = list_runs()
+    if not runs:
+        show_empty_state()
+        return
+
+    run_name = st.sidebar.selectbox("Run", runs)
+    metrics = load_metrics(run_name)
+    predictions = load_predictions(run_name)
+    node_ids = [str(item) for item in predictions["node_ids"].tolist()]
+    is_synthetic = bool(metrics.get("is_synthetic_data"))
+    if is_synthetic:
+        st.warning("当前 run 使用 synthetic demo data：只代表流程演示，不代表真实城市交通状况或真实预测效果。")
+
+    tabs = st.tabs(
+        [
+            "Overview",
+            "Data Explorer",
+            "Network View",
+            "Forecast Explorer",
+            "Model Comparison",
+            "Error Diagnostics",
+            "Congestion Risk",
+            "Agent Console",
+            "Report",
+        ]
+    )
+
+    with tabs[0]:
+        st.subheader("Run Overview")
+        cols = st.columns(6)
+        for col, (label, key) in zip(
+            cols,
+            [
+                ("Dataset", "dataset_name"),
+                ("Model", "model_name"),
+                ("Horizon", "horizon"),
+                ("MAE", "mae"),
+                ("RMSE", "rmse"),
+                ("MAPE", "mape"),
+            ],
+            strict=False,
+        ):
+            with col:
+                metric_card(label, metrics.get(key, "unknown"))
+        st.json(
+            {
+                "synthetic": metrics.get("is_synthetic_data"),
+                "adjacency_type": metrics.get("adjacency_type"),
+                "num_nodes": metrics.get("num_nodes"),
+                "num_features": metrics.get("num_features"),
+                "train_time_range": metrics.get("train_time_range"),
+                "test_time_range": metrics.get("test_time_range"),
+            }
+        )
+        st.caption("解读：先确认数据类型、预测窗口和 split，再比较误差；synthetic run 不能作为真实效果证明。")
+
+    with tabs[1]:
+        st.subheader("Data Explorer")
+        data_path = metrics.get("dataset_path")
+        if data_path and Path(str(data_path)).exists():
+            data, _, metadata = load_traffic_npz(str(data_path))
+            selected_node = st.selectbox("Node", metadata["node_ids"], key="data_node")
+            node_idx = metadata["node_ids"].index(selected_node)
+            speed = data[:, node_idx, 0]
+            speed_fig = px.line(y=speed[: min(1000, len(speed))], labels={"x": "time", "y": "speed"})
+            st.plotly_chart(speed_fig, use_container_width=True)
+            st.write({"missing_ratio": float(np.isnan(data).mean()), "feature_names": metadata["feature_names"]})
+            st.caption("解读：真实数据实验前先看缺失率、日内模式和异常速度段，避免直接相信总指标。")
+        else:
+            st.info("本地没有找到 dataset_path，仍可查看已保存的 prediction artifacts。")
+
+    with tabs[2]:
+        st.subheader("Network View")
+        data_path = metrics.get("dataset_path")
+        if data_path and Path(str(data_path)).exists():
+            _, adjacency, metadata = load_traffic_npz(str(data_path))
+            stats = adjacency_stats(adjacency)
+            st.json(stats)
+            connected = pd.DataFrame(top_connected_nodes(adjacency, metadata["node_ids"], k=10))
+            st.dataframe(connected, use_container_width=True)
+            degrees = adjacency.astype(bool).sum(axis=1)
+            angles = np.linspace(0, 2 * np.pi, len(degrees))
+            fig = px.scatter(
+                x=np.cos(angles),
+                y=np.sin(angles),
+                size=degrees + 1,
+                color=degrees,
+                hover_name=metadata["node_ids"],
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption("解读：没有经纬度时使用 circular layout。节点颜色/大小表示连接度，不代表真实地理位置。")
+        else:
+            st.info("需要本地数据文件才能展示 adjacency 结构。")
+
+    with tabs[3]:
+        st.subheader("Forecast Explorer")
+        selected_node = st.selectbox("Node", node_ids, key="forecast_node")
+        horizon_step = st.slider("Horizon step", 1, int(metrics.get("horizon", predictions["y_pred"].shape[1])), 1)
+        node_idx = node_ids.index(selected_node)
+        y_true = predictions["y_true"][:, horizon_step - 1, node_idx]
+        y_pred = predictions["y_pred"][:, horizon_step - 1, node_idx]
+        forecast_fig = prediction_figure(y_true, y_pred, f"{selected_node} horizon={horizon_step}")
+        st.plotly_chart(forecast_fig, use_container_width=True)
+        residual_fig = px.line(y=(y_pred - y_true)[:240], labels={"x": "sample", "y": "residual"})
+        st.plotly_chart(residual_fig, use_container_width=True)
+        st.caption("解读：看预测曲线是否跟随趋势，也要看残差是否集中在高峰或突发下降段。")
+
+    with tabs[4]:
+        st.subheader("Model Comparison")
+        rows = []
+        for candidate in runs:
+            row = load_metrics(candidate) | {"run_name": candidate}
+            rows.append(row)
+        frame = pd.DataFrame(rows)
+        columns = ["run_name", "model_name", "horizon", "mae", "rmse", "mape", "is_synthetic_data"]
+        st.dataframe(frame[columns], use_container_width=True)
+        comparison_fig = px.bar(frame, x="model_name", y="mae", color="horizon", hover_name="run_name")
+        st.plotly_chart(comparison_fig, use_container_width=True)
+        if "last_value" in set(frame["model_name"]):
+            deep_rows = frame[~frame["model_name"].isin(["last_value", "historical_average", "seasonal_naive"])]
+            best_deep = deep_rows["mae"].min()
+            last_value = frame[frame["model_name"] == "last_value"]["mae"].min()
+            if pd.notna(best_deep) and best_deep >= last_value:
+                st.warning("深度模型没有超过 LastValue baseline，不能声称模型预测能力优于强 naive baseline。")
+        st.caption("解读：交通短时预测必须先看 LastValue；只看深度模型之间的差异是不完整的。")
+
+    with tabs[5]:
+        st.subheader("Error Diagnostics")
+        y_true = predictions["y_true"]
+        y_pred = predictions["y_pred"]
+        st.plotly_chart(px.bar(error_by_horizon(y_true, y_pred), x="horizon_step", y="mae"), use_container_width=True)
+        node_error = error_by_node(y_true, y_pred, node_ids)
+        st.plotly_chart(px.bar(node_error.head(20), x="node_id", y="mae"), use_container_width=True)
+        timestamps = [str(item) for item in predictions["timestamps"].tolist()] if "timestamps" in predictions else None
+        tod = error_by_time_of_day(y_true, y_pred, timestamps)
+        st.plotly_chart(px.bar(tod, x="hour", y="mae"), use_container_width=True)
+        st.write("Residual distribution", residual_distribution(y_true, y_pred))
+        st.dataframe(pd.DataFrame(worst_case_segments(y_true, y_pred, node_ids, top_k=20)), use_container_width=True)
+        st.caption("解读：高误差 horizon、节点和时间段比单个总 MAE 更能说明模型失败模式。")
+
+    with tabs[6]:
+        st.subheader("Congestion Risk")
+        top_k = st.slider("Top-K", 1, 20, 5)
+        congestion = get_top_congestion_nodes(str(OUTPUTS_DIR / run_name), k=top_k)
+        st.dataframe(pd.DataFrame(congestion), use_container_width=True)
+        st.caption("解读：风险来自预测速度阈值和历史下降幅度，是离线拥堵风险提示，不是事故检测。")
+
+    with tabs[7]:
+        st.subheader("Agent Console")
+        query = st.text_input("中文问题", value="哪个模型效果最好？")
+        if st.button("Run Agent"):
+            response = AgentExecutor(outputs_dir=str(OUTPUTS_DIR)).run(query, run_name=run_name)
+            st.write(response.answer)
+            st.write(
+                {
+                    "intent": response.intent,
+                    "confidence": response.confidence,
+                    "tools_used": response.tools_used,
+                    "trace_id": response.trace_id,
+                }
+            )
             st.json(response.data)
+            st.info("Limitations: " + " ".join(response.limitations))
+        st.caption("解读：Agent 只做工具选择、执行和解释；trace 记录了计划、工具输入输出和数据来源。")
 
-    st.subheader("日报")
-    if st.button("生成日报"):
-        st.markdown(generate_daily_report(str(OUTPUTS_DIR / run_name)))
+    with tabs[8]:
+        st.subheader("Report")
+        report = generate_daily_report(str(OUTPUTS_DIR / run_name))
+        st.markdown(report)
+        st.download_button("Download Markdown", report, file_name=f"{run_name}_report.md")
+        st.caption("解读：报告可作为作品集材料草稿，但真实数据指标必须由你自己跑出后再填写。")
 
 
 if __name__ == "__main__":

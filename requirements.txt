@@ -8,6 +8,8 @@ streamlit>=1.31
 plotly>=5.18
 pydantic>=2.5
 PyYAML>=6.0
+tables>=3.8
+kaleido>=0.2
 pytest>=7.4
 ruff>=0.4
 -e .
