@@ -1,0 +1,54 @@
+seed: 42
+data:
+  path: data/processed/pems_bay.npz
+  input_steps: 12
+  horizon: 3
+  train_ratio: 0.7
+  val_ratio: 0.1
+  target_feature: speed
+training:
+  batch_size: 64
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  patience: 20
+  gradient_clip_norm: 5.0
+  use_amp: true
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  compile_model: false
+  device: auto
+  loss: masked_mae
+model:
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.3
+  graph_wavenet_full:
+    residual_channels: 64
+    dilation_channels: 64
+    skip_channels: 256
+    end_channels: 512
+    kernel_size: 2
+    blocks: 4
+    layers: 2
+    gcn_depth: 2
+    dropout: 0.3
+    use_adaptive_adj: true
+    node_embedding_dim: 10
+    add_identity_support: true
+    add_transpose_support: true
+  stgcn_full:
+    hidden_channels: 64
+    temporal_kernel_size: 3
+    cheb_order: 3
+    num_blocks: 3
+    dropout: 0.3
+    use_layer_norm: true
+analysis:
+  congestion_speed_threshold: 35.0
+  top_k: 10
+outputs:
+  dir: outputs
+  run_name: pems_bay_5090
+  allow_overwrite: false

@@ -48,6 +48,15 @@ The implemented STGCNImproved is educational and simplified:
 
 It is STGCN-inspired, not a faithful reproduction of the original paper.
 
+## STGCNFull
+
+STGCNFull is a paper-inspired ST-Conv implementation. Each block applies temporal GLU convolution,
+Chebyshev-style K-order graph convolution, another temporal GLU convolution, residual connection,
+layer normalization, and dropout. K-order graph convolution means node states are mixed not only
+from one-hop neighbors but also from repeated graph propagation terms. This model is stronger than
+STGCNLite/STGCNImproved structurally, but it is still not an official reproduction unless the
+original paper protocol is matched.
+
 ## GraphWaveNetLite
 
 GraphWaveNetLite is inspired by Graph WaveNet:
@@ -58,6 +67,13 @@ GraphWaveNetLite is inspired by Graph WaveNet:
 - skip connections help gradients and preserve multi-scale features.
 
 It is an educational simplification, not a complete Graph WaveNet reproduction.
+
+## GraphWaveNetFull
+
+GraphWaveNetFull includes the main Graph WaveNet ideas: start convolution, dilated causal temporal
+convolution stack, gated activation, residual and skip connections, multi-support diffusion graph
+convolution, adaptive adjacency from learnable node embeddings, dropout, and end convolutions. It is
+paper-inspired, not a faithful official reproduction.
 
 ## Metrics
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pickle
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,58 @@ def read_dcrnn_adjacency(path: str | Path) -> tuple[list[str], dict[str, int], n
     return [str(item) for item in sensor_ids], dict(sensor_id_to_ind), np.asarray(adjacency, dtype=np.float32)
 
 
+def align_data_and_adjacency(
+    data: np.ndarray,
+    h5_node_ids: list[str],
+    adj_node_ids: list[str],
+    adjacency: np.ndarray,
+    dataset_name: str,
+) -> tuple[np.ndarray, np.ndarray, list[str], dict[str, Any]]:
+    """Align traffic data columns to adjacency sensor order and report every decision."""
+    h5_index = {node_id: idx for idx, node_id in enumerate(h5_node_ids)}
+    adj_index = {node_id: idx for idx, node_id in enumerate(adj_node_ids)}
+    common = [node_id for node_id in adj_node_ids if node_id in h5_index]
+    dropped_from_h5 = [node_id for node_id in h5_node_ids if node_id not in adj_index]
+    dropped_from_adj = [node_id for node_id in adj_node_ids if node_id not in h5_index]
+    warnings: list[str] = []
+
+    if common:
+        data_indices = [h5_index[node_id] for node_id in common]
+        adj_indices = [adj_index[node_id] for node_id in common]
+        aligned_data = data[:, data_indices, :]
+        aligned_adjacency = adjacency[np.ix_(adj_indices, adj_indices)]
+        strategy = "intersection_reordered_to_adjacency_sensor_ids"
+        if dropped_from_h5 or dropped_from_adj:
+            warnings.append("HDF5 columns and adjacency sensor ids differ; using their intersection.")
+    elif data.shape[1] == adjacency.shape[0]:
+        aligned_data = data
+        aligned_adjacency = adjacency
+        common = adj_node_ids
+        strategy = "count_match_order_assumed"
+        warnings.append(
+            "Could not match HDF5 columns to adjacency sensor ids by name; node order is assumed from file order."
+        )
+    else:
+        raise ValueError(
+            "Cannot align traffic data and adjacency: no matching node ids and different node counts "
+            f"(h5={data.shape[1]}, adjacency={adjacency.shape[0]})."
+        )
+
+    report = {
+        "dataset_name": dataset_name,
+        "original_h5_node_count": len(h5_node_ids),
+        "original_adj_node_count": len(adj_node_ids),
+        "aligned_node_count": len(common),
+        "dropped_from_h5": dropped_from_h5,
+        "dropped_from_adj": dropped_from_adj,
+        "h5_column_order_example": h5_node_ids[:10],
+        "adj_sensor_order_example": adj_node_ids[:10],
+        "alignment_strategy": strategy,
+        "warning_messages": warnings,
+    }
+    return aligned_data, aligned_adjacency, common, report
+
+
 def build_correlation_adjacency(data: np.ndarray, train_ratio: float = 0.7, threshold: float = 0.3) -> np.ndarray:
     """Build a correlation graph from the train time segment only to avoid leakage."""
     train_end = max(2, int(data.shape[0] * train_ratio))
@@ -105,11 +158,28 @@ def prepare_real_dataset(
         if not adj_path.exists():
             raise FileNotFoundError(f"Adjacency file not found: {adj_path}")
         adj_node_ids, _, adjacency = read_dcrnn_adjacency(adj_path)
-        if len(adj_node_ids) == data.shape[1] and adj_node_ids != node_ids:
-            node_ids = adj_node_ids
+        data, adjacency, node_ids, alignment_report = align_data_and_adjacency(
+            data,
+            node_ids,
+            adj_node_ids,
+            adjacency,
+            dataset,
+        )
     elif build_correlation_adj:
         adjacency = build_correlation_adjacency(data, train_ratio=train_ratio)
         adjacency_type = "correlation"
+        alignment_report = {
+            "dataset_name": dataset,
+            "original_h5_node_count": len(node_ids),
+            "original_adj_node_count": 0,
+            "aligned_node_count": len(node_ids),
+            "dropped_from_h5": [],
+            "dropped_from_adj": [],
+            "h5_column_order_example": node_ids[:10],
+            "adj_sensor_order_example": [],
+            "alignment_strategy": "correlation_adjacency_from_train_split",
+            "warning_messages": ["Correlation adjacency is not physical road topology."],
+        }
     else:
         raise ValueError("Provide --adj-file or set --build-correlation-adj true.")
 
@@ -122,6 +192,8 @@ def prepare_real_dataset(
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path = output_path.parent / "node_alignment_report.json"
+    report_path.write_text(json.dumps(alignment_report, indent=2, ensure_ascii=False), encoding="utf-8")
     np.savez_compressed(
         output_path,
         data=data.astype(np.float32),
@@ -141,6 +213,7 @@ def prepare_real_dataset(
     print(f"time_range={time_range}")
     print(f"missing_ratio={missing_ratio:.6f}")
     print(f"adjacency_type={adjacency_type}")
+    print(f"node_alignment_report={report_path}")
     print(f"output_path={output_path}")
     return output_path
 

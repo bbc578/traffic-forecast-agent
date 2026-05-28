@@ -42,6 +42,10 @@ def main() -> None:
     abl = sub.add_parser("ablation")
     abl.add_argument("--config", default="configs/ablation.yaml")
     abl.add_argument("--output", default="experiments/results/ablation_summary.csv")
+    abl.add_argument("--models", nargs="+", default=["stgcn_full", "graph_wavenet_full"])
+    abl.add_argument("--horizons", nargs="+", type=int, default=[3])
+    abl.add_argument("--seeds", nargs="+", type=int, default=[42])
+    abl.add_argument("--graph-types", nargs="+", default=["identity", "physical"])
 
     rep = sub.add_parser("report")
     rep.add_argument("--runs-dir", default="outputs")
@@ -64,7 +68,7 @@ def main() -> None:
     elif args.command == "run-experiments":
         run_experiments(args.config, args.models, args.horizons, args.seeds, args.output)
     elif args.command == "ablation":
-        run_ablation(args.config, args.output)
+        run_ablation(args.config, args.output, args.models, args.horizons, args.seeds, args.graph_types)
     elif args.command == "report":
         generate_experiment_report(args.runs_dir, args.output)
     elif args.command == "export-figures":

@@ -21,12 +21,23 @@ class TrainingConfig(BaseModel):
     epochs: int = 5
     learning_rate: float = 0.001
     weight_decay: float = 0.0001
+    patience: int | None = None
+    gradient_clip_norm: float | None = None
+    use_amp: bool = False
+    num_workers: int = 0
+    pin_memory: bool = False
+    persistent_workers: bool = False
+    compile_model: bool = False
+    device: str = "auto"
+    loss: str = "masked_mae"
 
 
 class ModelConfig(BaseModel):
     hidden_size: int = 64
     num_layers: int = 1
     dropout: float = 0.1
+    graph_wavenet_full: dict[str, Any] = Field(default_factory=dict)
+    stgcn_full: dict[str, Any] = Field(default_factory=dict)
 
 
 class AnalysisConfig(BaseModel):

@@ -86,6 +86,10 @@ def main() -> None:
             "Model Comparison",
             "Error Diagnostics",
             "Congestion Risk",
+            "Horizon Analysis",
+            "Ablation Analysis",
+            "Subset Evaluation",
+            "GPU Training Monitor",
             "Agent Console",
             "Report",
         ]
@@ -212,6 +216,58 @@ def main() -> None:
         st.caption("解读：风险来自预测速度阈值和历史下降幅度，是离线拥堵风险提示，不是事故检测。")
 
     with tabs[7]:
+        st.subheader("Horizon Analysis")
+        files = sorted(Path("experiments/results").glob("*summary*.csv"))
+        if files:
+            selected = st.selectbox("Experiment summary CSV", [str(path) for path in files])
+            frame = pd.read_csv(selected)
+            st.dataframe(frame, use_container_width=True)
+            if {"horizon", "model_name", "mae"}.issubset(frame.columns):
+                st.plotly_chart(px.line(frame, x="horizon", y="mae", color="model_name", markers=True), use_container_width=True)
+            st.caption("解读：较长 horizon 更能检验时空模型是否捕捉传播动态；不要只看 h=3。")
+        else:
+            st.info("缺少多 horizon 结果。运行 README 中的 metr_la_5090_full_summary 命令。")
+
+    with tabs[8]:
+        st.subheader("Ablation Analysis")
+        files = sorted(Path("experiments/results").glob("*ablation*.csv"))
+        if files:
+            selected = st.selectbox("Ablation CSV", [str(path) for path in files])
+            frame = pd.read_csv(selected)
+            st.dataframe(frame, use_container_width=True)
+            if {"graph_type", "mae", "model_name"}.issubset(frame.columns):
+                st.plotly_chart(px.bar(frame, x="graph_type", y="mae", color="model_name", barmode="group"), use_container_width=True)
+            st.caption("解读：只有 physical/adaptive 稳定优于 identity 时，才可以说图结构在该设置下有收益。")
+        else:
+            st.info("缺少图结构消融结果。运行 `python -m traffic_agent.training.run_ablation ...`。")
+
+    with tabs[9]:
+        st.subheader("Congestion Subset Evaluation")
+        files = sorted(Path("experiments/results").glob("*congestion_subset*.csv"))
+        if files:
+            selected = st.selectbox("Subset CSV", [str(path) for path in files])
+            frame = pd.read_csv(selected)
+            st.dataframe(frame, use_container_width=True)
+            if {"subset", "mae", "model_name"}.issubset(frame.columns):
+                st.plotly_chart(px.bar(frame, x="subset", y="mae", color="model_name", barmode="group"), use_container_width=True)
+            st.caption("解读：如果图模型在 speed_drop/low_speed 子集更好，才是拥堵场景价值证据。")
+        else:
+            st.info("缺少拥堵子集评估结果。")
+
+    with tabs[10]:
+        st.subheader("GPU Training Monitor")
+        log_path = OUTPUTS_DIR / run_name / "train_log.csv"
+        if log_path.exists():
+            log = pd.read_csv(log_path)
+            st.dataframe(log, use_container_width=True)
+            if {"epoch", "train_loss", "val_loss"}.issubset(log.columns):
+                melted = log.melt(id_vars=["epoch"], value_vars=["train_loss", "val_loss"])
+                st.plotly_chart(px.line(melted, x="epoch", y="value", color="variable"), use_container_width=True)
+            st.caption("解读：关注 best_epoch、val_loss 平台期、epoch time 和 GPU memory。")
+        else:
+            st.info("该 run 没有 train_log.csv。请用新版训练脚本重跑。")
+
+    with tabs[11]:
         st.subheader("Agent Console")
         query = st.text_input("中文问题", value="哪个模型效果最好？")
         if st.button("Run Agent"):
@@ -229,7 +285,7 @@ def main() -> None:
             st.info("Limitations: " + " ".join(response.limitations))
         st.caption("解读：Agent 只做工具选择、执行和解释；trace 记录了计划、工具输入输出和数据来源。")
 
-    with tabs[8]:
+    with tabs[12]:
         st.subheader("Report")
         report = generate_daily_report(str(OUTPUTS_DIR / run_name))
         st.markdown(report)

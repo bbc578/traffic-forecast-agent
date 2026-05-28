@@ -17,6 +17,7 @@ from traffic_agent.analysis.error_analysis import (
     error_by_node,
     error_by_time_of_day,
     load_predictions,
+    worst_case_segments,
 )
 from traffic_agent.analysis.explainability import explain_node_forecast
 
@@ -73,6 +74,47 @@ def compare_models(outputs_dir: str = "outputs", **_: Any) -> list[dict[str, Any
     return compare_runs(outputs_dir)
 
 
+def compare_against_last_value(outputs_dir: str = "outputs", **_: Any) -> dict[str, Any]:
+    rows = compare_runs(outputs_dir)
+    last = [row for row in rows if row.get("model_name") == "last_value"]
+    if not last:
+        return {
+            "status": "missing",
+            "message": "缺少 last_value 实验结果。",
+            "run_command": "python -m traffic_agent.training.train --config configs/metr_la_5090.yaml --model last_value",
+        }
+    best_last = min(last, key=lambda row: row.get("mae", float("inf")))
+    comparisons = []
+    for row in rows:
+        if row.get("model_name") != "last_value" and row.get("mae") is not None:
+            comparisons.append(
+                {
+                    "model_name": row.get("model_name"),
+                    "run_name": row.get("run_name"),
+                    "mae_delta_vs_last_value": row["mae"] - best_last["mae"],
+                    "beats_last_value_mae": row["mae"] < best_last["mae"],
+                }
+            )
+    return {"last_value": best_last, "comparisons": comparisons}
+
+
+def compare_full_vs_lite(outputs_dir: str = "outputs", **_: Any) -> dict[str, Any]:
+    rows = compare_runs(outputs_dir)
+    wanted = {"graph_wavenet_full", "graph_wavenet_lite", "stgcn_full", "stgcn_improved"}
+    available = [row for row in rows if row.get("model_name") in wanted]
+    missing = sorted(wanted.difference({row.get("model_name") for row in available}))
+    return {
+        "available": available,
+        "missing": missing,
+        "run_command": (
+            "python -m traffic_agent.training.run_experiments --config configs/metr_la_5090.yaml "
+            "--models stgcn_improved graph_wavenet_lite stgcn_full graph_wavenet_full "
+            "--horizons 3 6 12 --seeds 42 43 44 "
+            "--output experiments/results/metr_la_5090_full_summary.csv"
+        ),
+    }
+
+
 def get_prediction_curve(**kwargs: Any) -> dict[str, Any]:
     args = ToolInput(**kwargs)
     payload = load_predictions(_resolve_run_dir(args))
@@ -101,6 +143,64 @@ def get_error_by_time_of_day(**kwargs: Any) -> list[dict[str, Any]]:
     payload = load_predictions(_resolve_run_dir(ToolInput(**kwargs)))
     timestamps = [str(item) for item in payload["timestamps"].tolist()] if "timestamps" in payload else None
     return error_by_time_of_day(payload["y_true"], payload["y_pred"], timestamps).to_dict(orient="records")
+
+
+def get_failure_cases(**kwargs: Any) -> list[dict[str, Any]]:
+    args = ToolInput(**kwargs)
+    payload = load_predictions(_resolve_run_dir(args))
+    node_ids = [str(item) for item in payload["node_ids"].tolist()]
+    return worst_case_segments(payload["y_true"], payload["y_pred"], node_ids, top_k=args.k)
+
+
+def explain_why_last_value_is_strong(**_: Any) -> str:
+    return (
+        "短时交通速度具有很强的时间惯性，未来 15 分钟常接近最近观测值。"
+        "因此 LastValue 是必须击败的强 baseline；复杂模型未超过它时不能声称更有效。"
+    )
+
+
+def explain_raw_mape_issue(**_: Any) -> str:
+    return (
+        "Raw MAPE 在真实速度接近 0 时分母过小，会产生很大的百分比。"
+        "本项目报告 MAE、RMSE 和 masked MAPE，并记录 mape_denominator_floor。"
+    )
+
+
+def get_horizon_analysis(outputs_dir: str = "outputs", **_: Any) -> list[dict[str, Any]]:
+    rows = compare_runs(outputs_dir)
+    return sorted(rows, key=lambda row: (row.get("horizon") or 0, row.get("model_name") or ""))
+
+
+def get_ablation_summary(outputs_dir: str = "experiments/results", **_: Any) -> dict[str, Any]:
+    path = Path(outputs_dir)
+    files = sorted(path.glob("*ablation*.csv"))
+    if not files:
+        return {"status": "missing", "message": "缺少图结构消融结果。"}
+    return {"files": [str(file) for file in files]}
+
+
+def get_congestion_subset_eval(outputs_dir: str = "experiments/results", **_: Any) -> dict[str, Any]:
+    path = Path(outputs_dir)
+    files = sorted(path.glob("*congestion_subset*.csv"))
+    if not files:
+        return {"status": "missing", "message": "缺少拥堵子集评估结果。"}
+    return {"files": [str(file) for file in files]}
+
+
+def generate_resume_bullets(outputs_dir: str = "outputs", **_: Any) -> list[str]:
+    comparison = compare_against_last_value(outputs_dir)
+    if comparison.get("status") == "missing":
+        return ["完成交通预测工程框架搭建；真实模型对比需要先运行 LastValue baseline。"]
+    any_beats = any(item["beats_last_value_mae"] for item in comparison["comparisons"])
+    if any_beats:
+        return [
+            "在 METR-LA 真实交通数据上完成多模型时空预测对比，并用 MAE/RMSE/masked MAPE 评估。",
+            "对 LastValue、GRU、STGCN/GraphWaveNet 系列模型进行 horizon 与图结构消融分析。",
+        ]
+    return [
+        "在 METR-LA 真实交通数据和物理路网拓扑上完成多模型预测实验，发现 LastValue 在短时 MAE 上仍是强 baseline。",
+        "实现 full graph models、图结构消融和拥堵子集评估，用误差诊断解释复杂模型未稳定超过 baseline 的原因。",
+    ]
 
 
 def get_data_card(**kwargs: Any) -> dict[str, Any]:
@@ -180,6 +280,15 @@ def default_tool_registry() -> dict[str, ToolSpec]:
         ("get_run_metadata", "Read run metadata.", get_run_metadata),
         ("get_latest_metrics", "Read metrics from one run.", _metrics),
         ("compare_models", "Compare saved run metrics.", compare_models),
+        ("compare_against_last_value", "Compare all models against LastValue baseline.", compare_against_last_value),
+        ("compare_full_vs_lite", "Compare full graph models against lite graph models.", compare_full_vs_lite),
+        ("get_horizon_analysis", "Summarize saved results by horizon.", get_horizon_analysis),
+        ("get_ablation_summary", "Locate graph ablation result files.", get_ablation_summary),
+        ("get_congestion_subset_eval", "Locate congestion subset evaluation files.", get_congestion_subset_eval),
+        ("get_failure_cases", "Return worst forecast cases.", get_failure_cases),
+        ("explain_why_last_value_is_strong", "Explain why LastValue is a strong traffic baseline.", explain_why_last_value_is_strong),
+        ("explain_raw_mape_issue", "Explain raw MAPE failure mode.", explain_raw_mape_issue),
+        ("generate_resume_bullets", "Generate resume-safe bullets from local results.", generate_resume_bullets),
         ("get_prediction_curve", "Return prediction curve data for one node.", get_prediction_curve),
         ("get_top_congestion_nodes", "Rank congestion risk nodes.", _congestion),
         ("get_error_by_horizon", "Compute horizon-wise errors.", get_error_by_horizon),
