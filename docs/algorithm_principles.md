@@ -63,10 +63,11 @@ It is an educational simplification, not a complete Graph WaveNet reproduction.
 
 - MAE: average absolute speed error.
 - RMSE: penalizes large errors more heavily.
-- MAPE: relative error percentage, sensitive when true values are near zero.
-- Masked metrics: ignore NaN/Inf and optional sentinel values.
+- MAPE: relative error percentage with a denominator floor; still sensitive when true speeds are low.
+- Masked metrics: ignore NaN/Inf, optional sentinel values, and low-speed denominators for masked MAPE.
 
-MAPE should be interpreted carefully for low-speed or zero-speed values.
+MAPE should be interpreted carefully for low-speed or zero-speed values. For real METR-LA reports,
+prefer MAE, RMSE, and masked MAPE over raw MAPE.
 
 ## Reading Experiments
 

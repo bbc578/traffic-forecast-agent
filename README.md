@@ -137,6 +137,10 @@ Each run saves:
 - `run_summary.md`
 - `model.pt` for trainable models
 
+For METR-LA style speed data, ordinary MAPE can be misleading when true speeds are near zero. The
+training script records a `mape_denominator_floor` and also saves masked metrics. Prefer MAE, RMSE,
+and masked MAPE in reports.
+
 Large outputs are ignored by Git.
 
 ## Dashboard

@@ -9,13 +9,37 @@ import numpy as np
 import pandas as pd
 
 
+def _read_hdf_with_legacy_fallback(path: str | Path) -> pd.DataFrame:
+    """Read old pandas HDF files across pandas/PyTables versions."""
+    try:
+        try:
+            return pd.read_hdf(str(path))
+        except ValueError:
+            return pd.read_hdf(str(path), key="df")
+    except TypeError as exc:
+        if "bytes-like object is required" not in str(exc):
+            raise
+
+    try:
+        import tables
+    except ImportError as exc:
+        raise ImportError("PyTables is required for the legacy HDF5 fallback reader.") from exc
+
+    with tables.open_file(str(path), mode="r") as store:
+        for node in store.walk_nodes("/"):
+            shape = getattr(node, "shape", None)
+            if shape is None or len(shape) != 2:
+                continue
+            values = np.asarray(node.read())
+            if values.ndim == 2:
+                return pd.DataFrame(values)
+    raise ValueError(f"Could not find a 2D traffic array in HDF5 file: {path}")
+
+
 def read_hdf_traffic(path: str | Path) -> tuple[np.ndarray, list[str], list[str], list[str]]:
     """Read a METR-LA/PEMS-BAY style HDF5 traffic file."""
     try:
-        try:
-            frame = pd.read_hdf(path)
-        except ValueError:
-            frame = pd.read_hdf(path, key="df")
+        frame = _read_hdf_with_legacy_fallback(path)
     except ImportError as exc:
         raise ImportError(
             "Reading .h5 traffic files requires PyTables. Install dependencies with "
@@ -39,9 +63,14 @@ def read_dcrnn_adjacency(path: str | Path) -> tuple[list[str], dict[str, int], n
     """Read DCRNN `adj_mx.pkl` files."""
     with Path(path).open("rb") as f:
         payload: Any = pickle.load(f, encoding="latin1")
-    if not isinstance(payload, tuple) or len(payload) < 3:
-        raise ValueError("Expected DCRNN adj_mx.pkl tuple: (sensor_ids, sensor_id_to_ind, adj_mx).")
+    if not isinstance(payload, (tuple, list)) or len(payload) < 3:
+        raise ValueError("Expected DCRNN adj_mx.pkl tuple/list: (sensor_ids, sensor_id_to_ind, adj_mx).")
     sensor_ids, sensor_id_to_ind, adjacency = payload[:3]
+    if not isinstance(sensor_id_to_ind, dict):
+        raise ValueError("DCRNN adjacency payload item 1 must be sensor_id_to_ind dict.")
+    adjacency = np.asarray(adjacency, dtype=np.float32)
+    if adjacency.ndim != 2:
+        raise ValueError(f"DCRNN adjacency matrix must be 2D, got shape {adjacency.shape}.")
     return [str(item) for item in sensor_ids], dict(sensor_id_to_ind), np.asarray(adjacency, dtype=np.float32)
 
 

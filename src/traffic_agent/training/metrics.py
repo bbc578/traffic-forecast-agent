@@ -25,8 +25,12 @@ def rmse(y_true: Any, y_pred: Any) -> float:
     return float(np.sqrt(np.mean((true - pred) ** 2)))
 
 
-def mape(y_true: Any, y_pred: Any, epsilon: float = 1e-5) -> float:
-    """Mean absolute percentage error with epsilon protection."""
+def mape(y_true: Any, y_pred: Any, epsilon: float = 1.0) -> float:
+    """Mean absolute percentage error with a denominator floor.
+
+    Traffic speed data can contain zero or near-zero readings. A small numerical epsilon makes MAPE
+    explode into unusable percentages, so the default denominator floor is 1 speed unit.
+    """
     true = _to_numpy(y_true)
     pred = _to_numpy(y_pred)
     denominator = np.maximum(np.abs(true), epsilon)
@@ -64,9 +68,9 @@ def masked_mape(
     y_true: Any,
     y_pred: Any,
     mask_value: float | None = None,
-    epsilon: float = 1e-5,
+    epsilon: float = 1.0,
 ) -> float:
-    """MAPE ignoring NaN/Inf, optional sentinel values, and near-zero denominators."""
+    """MAPE ignoring NaN/Inf, optional sentinel values, and low-speed denominators."""
     true, pred = _masked_arrays(y_true, y_pred, mask_value)
     keep = np.abs(true) > epsilon
     if not np.any(keep):

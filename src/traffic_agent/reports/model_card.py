@@ -32,6 +32,8 @@ def generate_model_card(run_dir: str | Path, output: str | Path) -> Path:
 - RMSE: {metrics.get("rmse")}
 - MAPE: {metrics.get("mape")}
 - Masked MAE: {metrics.get("masked_mae")}
+- Masked RMSE: {metrics.get("masked_rmse")}
+- Masked MAPE: {metrics.get("masked_mape")}
 
 ## Intended Use
 Offline learning, model comparison, and portfolio demonstration.

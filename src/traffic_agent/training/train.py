@@ -141,6 +141,8 @@ def _write_run_summary(run_dir: Path, metrics: dict[str, object]) -> None:
         f"- RMSE: {metrics['rmse']:.6f}",
         f"- MAPE: {metrics['mape']:.6f}",
         f"- Masked MAE: {metrics['masked_mae']:.6f}",
+        f"- Masked RMSE: {metrics['masked_rmse']:.6f}",
+        f"- Masked MAPE: {metrics['masked_mape']:.6f}",
         "",
         "## Resume Use",
         "",
@@ -149,6 +151,7 @@ def _write_run_summary(run_dir: Path, metrics: dict[str, object]) -> None:
         "## Limitations",
         "",
         "- Metrics are computed only for this local split and configuration.",
+        "- MAPE uses a 1 speed-unit denominator floor; masked MAPE ignores near-zero true speeds.",
         "- Congestion risk and explanations are offline analysis aids, not traffic control decisions.",
     ]
     (run_dir / "run_summary.md").write_text("\n".join(lines), encoding="utf-8")
@@ -297,6 +300,7 @@ def train_model(
         "masked_mae": masked_mae(y_true, y_pred),
         "masked_rmse": masked_rmse(y_true, y_pred),
         "masked_mape": masked_mape(y_true, y_pred),
+        "mape_denominator_floor": 1.0,
         "created_at": datetime.now(tz=UTC).isoformat(),
         "git_commit": _git_commit(),
         "device": str(device),
